@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Random 15 puzzle every minute</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        .time-display {
+            font-size: 1.2em;
+            margin: 10px 0;
+        }
+        .countdown {
+            font-size: 1.1em;
+            color: #666;
+            margin: 10px 0;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .puzzle {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 20px auto;
+            max-width: 300px;
+        }
+        .tile {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #eee;
+            border-radius: 4px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .tile.empty {
+            background: transparent;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .history {
+            text-align: left;
+            margin-top: 20px;
+            max-height: 500px;
+			min-width: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: white;
+        }
+        .history-item {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .current-minute {
+            background-color: #e6f7ff;
+            font-weight: bold;
+            border-left: 3px solid #1890ff;
+            padding-left: 8px;
+        }
+        .layout {
+            display: flex;
+            gap: 20px;
+        }
+        .left-panel {
+            flex: 1;
+        }
+        .right-panel {
+            flex: 2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Random 15 puzzle every minute</h1>
+    <div class="container">
+        <div class="layout">
+            <div class="left-panel">
+                <div id="history" class="history"></div>
+            </div>
+            <div class="right-panel">
+                <div class="time-display" id="currentTime">Loading online time...</div>
+                <div class="countdown" id="countdown"></div>
+                <div id="error" class="error"></div>
+                <div class="puzzle" id="puzzle"></div>
+                <div class="scramble" id="scramble"></div>
+                <button id="refreshBtn">Refresh Now</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const FACTORIAL_16 = 20922789888000;
+        let nextUpdateTime = 0;
+        let serverOffset = 0;
+        let countdownInterval = null;
+        let historySize = 10;
+
+        const currentTimeEl = document.getElementById('currentTime');
+        const countdownEl = document.getElementById('countdown');
+        const errorEl = document.getElementById('error');
+        const puzzleEl = document.getElementById('puzzle');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const scrambleEl = document.getElementById('scramble');
+        const historyEl = document.getElementById('history');
+        
+        function isSolvable(puzzle) {
+            const emptyIndex = puzzle.indexOf(0);
+            const emptyRow = 4 - Math.floor(emptyIndex / 4);
+            let inversions = 0;
+            for (let i = 0; i < puzzle.length; i++) {
+                if (puzzle[i] === 0) continue;
+                for (let j = i + 1; j < puzzle.length; j++) {
+                    if (puzzle[j] === 0) continue;
+                    if (puzzle[i] > puzzle[j]) inversions++;
+                }
+            }
+
+            return (emptyRow % 2 === 1) ? (inversions % 2 === 0) : (inversions % 2 === 1);
+        }
+
+        function factorial(n) {
+            const facts = [1,1,2,6,24,120,720,5040,40320,362880,3628800,39916800,479001600,6227020800,87178291200,1307674368000];
+            return facts[n];
+        }
+
+        function numberToPermutation(k) {
+            const numbers = [...Array(16).keys()];
+            const permutation = [];
+            let remaining = k - 1;
+            for (let i = 15; i >= 0; i--) {
+                const divisor = factorial(i);
+                const pos = Math.floor(remaining / divisor);
+                permutation.push(numbers.splice(pos, 1)[0]);
+                remaining %= divisor;
+            }
+            return permutation;
+        }
+
+        function generatePuzzleNumber(minute) {
+            const seed = minute;
+            let candidate = ((seed * 9301 + 49297) % 233280) / 233280;
+            candidate = Math.floor(candidate * FACTORIAL_16) + 1;
+            return candidate;
+        }
+
+        function displayPuzzle(permutation) {
+            puzzleEl.innerHTML = '';
+
+            permutation.forEach(num => {
+                const tile = document.createElement('div');
+                tile.className = num === 0 ? 'tile empty' : 'tile';
+                tile.textContent = num || '';
+
+                // Apply soft rainbow colors
+                if ([1, 2, 3, 4].includes(num)) {
+                    tile.style.backgroundColor = '#f4aaaa'; // soft red
+                } else if ([5, 9, 13].includes(num)) {
+                    tile.style.backgroundColor = '#f8e8a0'; // soft yellow
+                } else if ([6, 7, 8].includes(num)) {
+                    tile.style.backgroundColor = '#b2e0b2'; // soft green
+                } else if ([10, 14].includes(num)) {
+                    tile.style.backgroundColor = '#b2e8f4'; // soft cyan
+                } else if ([11, 12].includes(num)) {
+                    tile.style.backgroundColor = '#a0b4f0'; // soft dark blue
+                } else if (num === 15) {
+                    tile.style.backgroundColor = '#dab0f8'; // soft purple
+                }
+
+                puzzleEl.appendChild(tile);
+            });
+
+            // Generate scramble line
+            const scramble = permutation.map(n => n === 0 ? '0' : n).reduce((rows, n, i) => {
+                const rowIndex = Math.floor(i / 4);
+                rows[rowIndex] = (rows[rowIndex] || []).concat(n);
+                return rows;
+            }, []).map(row => row.join(' ')).join('/');
+            
+            scrambleEl.textContent = scramble;
+            return scramble;
+        }
+
+        function formatScramble(minuteTimestamp, scramble, isCurrent = false) {
+            const item = document.createElement('div');
+            item.className = 'history-item' + (isCurrent ? ' current-minute' : '');
+            item.textContent = `${scramble}`;
+            return item;
+        }
+
+        async function fetchOnlineTime() {
+            errorEl.textContent = '';
+            currentTimeEl.textContent = "Fetching online time...";
+
+            try {
+                const apiEndpoints = [
+                    'https://timeapi.io/api/Time/current/zone?timeZone=UTC',
+                    'http://worldclockapi.com/api/json/utc/now',
+                    'https://www.timeapi.io/api/Time/current/coordinate?latitude=0&longitude=0'
+                ];
+
+                let datetime = null;
+                for (const endpoint of apiEndpoints) {
+                    try {
+                        const res = await fetch(endpoint, { cache: 'no-store' });
+                        if (!res.ok) throw new Error(`Bad status: ${res.status}`);
+                        const data = await res.json();
+                        if (data.dateTime || data.currentDateTime) {
+                            datetime = new Date(data.dateTime || data.currentDateTime);
+                            if (!isNaN(datetime)) break;
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+                if (!datetime) throw new Error("All time APIs failed.");
+
+                const localNow = Date.now();
+                serverOffset = datetime.getTime() - localNow;
+
+                const serverMinute = Math.floor(datetime.getTime() / 60000);
+                const currentMinuteTimestamp = serverMinute;
+                
+                historyEl.innerHTML = '';
+                
+				const historyRange = 5;
+				for (let i = -historyRange; i <= historyRange; i++) {
+					const minute = serverMinute + i;
+					if (minute < 0) continue;
+					
+					const puzzleNumber = generatePuzzleNumber(minute);
+					let permutation = numberToPermutation(puzzleNumber);
+					
+					if (!isSolvable(permutation)) {
+						const nextNumber = (puzzleNumber % FACTORIAL_16) + 1;
+						permutation = numberToPermutation(nextNumber);
+					}
+					
+					const scramble = permutation.map(n => n === 0 ? '0' : n).reduce((rows, n, i) => {
+						const rowIndex = Math.floor(i / 4);
+						rows[rowIndex] = (rows[rowIndex] || []).concat(n);
+						return rows;
+					}, []).map(row => row.join(' ')).join('/');
+					
+					const isCurrent = minute === currentMinuteTimestamp;
+					historyEl.appendChild(formatScramble(minute, scramble, isCurrent));
+					
+					if (isCurrent) {
+						displayPuzzle(permutation);
+					}
+				}
+
+                const serverNow = localNow + serverOffset;
+                nextUpdateTime = serverNow - (serverNow % 60000) + 60000;
+
+                startCountdown();
+
+            } catch (err) {
+                errorEl.textContent = `Failed to get online time: ${err.message}`;
+                currentTimeEl.textContent = "Cannot get online time.";
+                clearInterval(countdownInterval);
+            }
+        }
+
+        function startCountdown() {
+            clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
+                const now = Date.now();
+                const serverNow = now + serverOffset;
+                const diff = nextUpdateTime - serverNow;
+
+                if (diff <= 0) {
+                    clearInterval(countdownInterval);
+                    fetchOnlineTime();
+                    return;
+                }
+
+                currentTimeEl.textContent = ``;
+                countdownEl.textContent = `Next puzzle in: ${Math.floor(diff / 1000)} seconds`;
+            }, 1000);
+        }
+
+        refreshBtn.addEventListener('click', fetchOnlineTime);
+        fetchOnlineTime();
+    </script>
+</body>
+</html>
