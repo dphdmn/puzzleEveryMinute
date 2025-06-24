@@ -212,81 +212,91 @@
             return item;
         }
 
-        async function fetchOnlineTime() {
-            errorEl.textContent = '';
-            currentTimeEl.textContent = "Fetching online time...";
+   async function fetchOnlineTime() {
+    errorEl.textContent = '';
+    currentTimeEl.textContent = "Fetching online time...";
 
+    try {
+        const apiEndpoints = [
+            'https://worldtimeapi.org/api/timezone/Etc/UTC',  // Recommended
+            'https://timeapi.io/api/Time/current/zone?timeZone=UTC',
+        ];
+
+        let timestamp = null;
+        
+        for (const endpoint of apiEndpoints) {
             try {
-                const apiEndpoints = [
-                    'https://timeapi.io/api/Time/current/zone?timeZone=UTC',
-                    'http://worldclockapi.com/api/json/utc/now',
-                    'https://www.timeapi.io/api/Time/current/coordinate?latitude=0&longitude=0'
-                ];
+                const res = await fetch(endpoint, { cache: 'no-store' });
+                if (!res.ok) throw new Error(`Bad status: ${res.status}`);
+                const data = await res.json();
+                
+                // Debug: Log raw API response
+                console.log("API Response:", data);
 
-                let datetime = null;
-                for (const endpoint of apiEndpoints) {
-                    try {
-                        const res = await fetch(endpoint, { cache: 'no-store' });
-                        if (!res.ok) throw new Error(`Bad status: ${res.status}`);
-                        const data = await res.json();
-                        if (data.dateTime || data.currentDateTime) {
-                            datetime = new Date(data.dateTime || data.currentDateTime);
-                            if (!isNaN(datetime)) break;
-                        }
-                    } catch (e) {
-                        continue;
-                    }
+                // Extract timestamp safely
+                if (data.utc_datetime || data.dateTime || data.currentDateTime) {
+                    const timeStr = data.utc_datetime || data.dateTime || data.currentDateTime;
+                    timestamp = new Date(timeStr + "Z").getTime();  // Force UTC
+                    if (!isNaN(timestamp)) break;
                 }
-                if (!datetime) throw new Error("All time APIs failed.");
+            } catch (e) {
+                console.error("API failed:", endpoint, e);
+                continue;
+            }
+        }
+        if (!timestamp) throw new Error("All time APIs failed.");
 
-                const localNow = Date.now();
-                serverOffset = datetime.getTime() - localNow;
+        // Debug: Print UTC & local time
+        console.log("UTC Time:", new Date(timestamp).toUTCString());
+        console.log("Local Time:", new Date(timestamp).toString());
 
-                const serverMinute = Math.floor(datetime.getTime() / 60000);
-                const currentMinuteTimestamp = serverMinute;
-                
-                historyEl.innerHTML = '';
-                
-				const historyRange = 5;
-				for (let i = -historyRange; i <= historyRange; i++) {
-					const minute = serverMinute + i;
-					if (minute < 0) continue;
-					
-					const puzzleNumber = generatePuzzleNumber(minute);
-					let permutation = numberToPermutation(puzzleNumber);
-					
-					if (!isSolvable(permutation)) {
-						const nextNumber = (puzzleNumber % FACTORIAL_16) + 1;
-						permutation = numberToPermutation(nextNumber);
-					}
-					
-					const scramble = permutation.map(n => n === 0 ? '0' : n).reduce((rows, n, i) => {
-						const rowIndex = Math.floor(i / 4);
-						rows[rowIndex] = (rows[rowIndex] || []).concat(n);
-						return rows;
-					}, []).map(row => row.join(' ')).join('/');
-					
-					const isCurrent = minute === currentMinuteTimestamp;
-					historyEl.appendChild(formatScramble(minute, scramble, isCurrent));
-					
-					if (isCurrent) {
-						displayPuzzle(permutation);
-					}
-				}
-
-                const serverNow = localNow + serverOffset;
-                nextUpdateTime = serverNow - (serverNow % 60000) + 60000;
-
-                startCountdown();
-
-            } catch (err) {
-                errorEl.textContent = `Failed to get online time: ${err.message}`;
-                currentTimeEl.textContent = "Cannot get online time.";
-                clearInterval(countdownInterval);
+        // Rest of your logic (unchanged)
+        const serverTime = timestamp;
+        serverOffset = serverTime - Date.now();
+        const serverMinute = Math.floor(serverTime / 60000);
+        const currentMinuteTimestamp = serverMinute;
+        
+        historyEl.innerHTML = '';
+        
+        const historyRange = 5;
+        for (let i = -historyRange; i <= historyRange; i++) {
+            const minute = serverMinute + i;
+            if (minute < 0) continue;
+            
+            const puzzleNumber = generatePuzzleNumber(minute);
+            let permutation = numberToPermutation(puzzleNumber);
+            
+            if (!isSolvable(permutation)) {
+                const nextNumber = (puzzleNumber % FACTORIAL_16) + 1;
+                permutation = numberToPermutation(nextNumber);
+            }
+            
+            const scramble = permutation.map(n => n === 0 ? '0' : n).reduce((rows, n, i) => {
+                const rowIndex = Math.floor(i / 4);
+                rows[rowIndex] = (rows[rowIndex] || []).concat(n);
+                return rows;
+            }, []).map(row => row.join(' ')).join('/');
+            
+            const isCurrent = minute === currentMinuteTimestamp;
+            historyEl.appendChild(formatScramble(minute, scramble, isCurrent));
+            
+            if (isCurrent) {
+                displayPuzzle(permutation);
             }
         }
 
-        function startCountdown() {
+        nextUpdateTime = serverTime - (serverTime % 60000) + 60000;
+
+        startCountdown(timestamp, serverMinute);
+
+    } catch (err) {
+        errorEl.textContent = `Failed to get online time: ${err.message}`;
+        currentTimeEl.textContent = "Cannot get online time.";
+        clearInterval(countdownInterval);
+    }
+}
+
+        function startCountdown(ts, serverMinute) {
             clearInterval(countdownInterval);
             countdownInterval = setInterval(() => {
                 const now = Date.now();
@@ -299,7 +309,7 @@
                     return;
                 }
 
-                currentTimeEl.textContent = ``;
+                currentTimeEl.textContent = `${new Date(ts).toUTCString()}, ${serverMinute}`;
                 countdownEl.textContent = `Next puzzle in: ${Math.floor(diff / 1000)} seconds`;
             }, 1000);
         }
